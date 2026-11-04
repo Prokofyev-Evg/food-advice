@@ -1,15 +1,15 @@
 "use client";
 
 import { useState, type KeyboardEvent } from "react";
-import { FILTERS, type FilterKey, type Recipe } from "@/lib/recipes";
+import { PANTRY } from "@/lib/catalog";
+import { FILTERS, findRecipes, type FilterKey, type Recipe } from "@/lib/recipes";
 
 export default function Home() {
   const [products, setProducts] = useState<string[]>(["яйца", "помидоры", "сыр"]);
   const [draft, setDraft] = useState("");
   const [filters, setFilters] = useState<FilterKey[]>([]);
-  const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [recipes, setRecipes] = useState<Recipe[] | null>(null);
   const [open, setOpen] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function addProduct() {
@@ -35,30 +35,18 @@ export default function Home() {
     setFilters((prev) => (prev.includes(key) ? prev.filter((f) => f !== key) : [...prev, key]));
   }
 
-  async function findRecipes() {
-    const all = draft.trim() ? [...products, ...draft.split(",").map((s) => s.trim()).filter(Boolean)] : products;
-    if (draft.trim()) addProduct();
+  function search() {
+    const extra = draft.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+    const all = [...products, ...extra.filter((x) => !products.includes(x))];
+    if (extra.length) addProduct();
+    setOpen(null);
     if (!all.length) {
       setError("Добавьте хотя бы один продукт.");
+      setRecipes(null);
       return;
     }
-    setLoading(true);
     setError(null);
-    setOpen(null);
-    try {
-      const res = await fetch("/api/recipes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ products: all, filters }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Ошибка сервера");
-      setRecipes(data.recipes);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Ошибка сети");
-    } finally {
-      setLoading(false);
-    }
+    setRecipes(findRecipes(all, filters));
   }
 
   return (
@@ -122,20 +110,17 @@ export default function Home() {
 
         <button
           type="button"
-          onClick={findRecipes}
-          disabled={loading}
-          className="w-full cursor-pointer rounded-2xl bg-orange-600 p-4 text-lg font-bold text-white hover:bg-orange-700 disabled:cursor-wait disabled:opacity-70"
+          onClick={search}
+          className="w-full cursor-pointer rounded-2xl bg-orange-600 p-4 text-lg font-bold text-white hover:bg-orange-700"
         >
-          {loading ? "Думаю, что приготовить…" : "Найти рецепты"}
+          Найти рецепты
         </button>
+        <p className="mt-2 text-center text-xs text-neutral-500">Считаем, что дома всегда есть {PANTRY}.</p>
 
         {error && <p className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}
 
         <div className="mt-6 grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
-          {loading &&
-            [0, 1, 2].map((i) => <div key={i} className="h-52 animate-pulse rounded-2xl bg-orange-100" />)}
-          {!loading &&
-            recipes.map((r, i) => (
+          {recipes?.map((r, i) => (
               <button
                 key={r.title}
                 type="button"
@@ -147,16 +132,22 @@ export default function Home() {
                 <div className="flex h-28 items-center justify-center bg-orange-100 text-5xl">{r.emoji}</div>
                 <div className="p-3">
                   <h3 className="mb-1.5 font-semibold">{r.title}</h3>
-                  <div className="text-sm text-neutral-500">⏱ {r.timeMinutes} минут</div>
+                  <div className="text-sm text-neutral-500">⏱ {r.time} минут</div>
                   <div className={`mt-1.5 text-sm ${r.missing.length ? "text-red-700" : "text-green-700"}`}>
                     {r.missing.length ? `Не хватает: ${r.missing.join(", ")}` : "Всё есть!"}
                   </div>
                 </div>
               </button>
-            ))}
+          ))}
         </div>
 
-        {!loading && open !== null && recipes[open] && <RecipeDetails recipe={recipes[open]} />}
+        {recipes?.length === 0 && (
+          <p className="mt-6 rounded-xl bg-white p-4 text-center text-neutral-600">
+            Ничего не нашлось 🤷 Добавьте ещё продуктов или уберите фильтры.
+          </p>
+        )}
+
+        {recipes && open !== null && recipes[open] && <RecipeDetails recipe={recipes[open]} />}
       </main>
     </>
   );
@@ -168,11 +159,13 @@ function RecipeDetails({ recipe }: { recipe: Recipe }) {
       <h2 className="text-xl font-bold">
         {recipe.emoji} {recipe.title}
       </h2>
-      <p className="mt-1 text-neutral-600">{recipe.description}</p>
       <h3 className="mt-4 font-semibold">Ингредиенты</h3>
-      <ul className="mt-1 list-disc pl-5 text-sm">
+      <ul className="mt-1 space-y-0.5 text-sm">
         {recipe.ingredients.map((ing) => (
-          <li key={ing}>{ing}</li>
+          <li key={ing.name} className={ing.have ? "" : "text-neutral-500"}>
+            {ing.have ? "✅" : ing.optional ? "➖" : "🛒"} {ing.name} — {ing.qty}
+            {ing.optional && !ing.have && " (по желанию)"}
+          </li>
         ))}
       </ul>
       <h3 className="mt-4 font-semibold">Как готовить</h3>
